@@ -1,0 +1,5 @@
+let%path home = "/"
+let%path signup = "/signup"
+let%path register = "/register"
+let%path login = "/login"
+let%path logout = "/logout"

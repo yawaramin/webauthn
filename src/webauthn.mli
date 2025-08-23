@@ -26,7 +26,8 @@
     storage.
 
     {{:https://w3c.github.io/webauthn/}WebAuthn specification at W3C.}
-*)
+
+{2 Main interface} *)
 
 (** The type of a webauthn state, containing the [origin]. *)
 type t
@@ -207,6 +208,8 @@ val decode_transport : string -> (transport list, [> `Msg of string ]) result
 val transports_of_cert : X509.Certificate.t ->
   (transport list, [> `Msg of string]) result
 
+(** {2 Simplified interface}*)
+
 (** Simplified interface on top of the above module, providing four main
     operations:
 
@@ -317,7 +320,7 @@ module Simple : sig
       be encoded into a JSON string and then decoded in the browser. Parameters
       are as described here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
-      PublicKeyCredentialCreationOptions instance properties}
+      PublicKeyCredentialCreationOptions instance properties}.
 
       @param exclude_credentials the default is to {e not exclude} any
         credentials.

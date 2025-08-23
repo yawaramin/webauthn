@@ -577,7 +577,7 @@ module Simple = struct
       attestation_formats = ["fido-u2f"];
       challenge = fst (generate_challenge ());
       exclude_credentials;
-      pub_key_cred_params = [{ type_ = "public-key"; alg = -7 }];
+      pub_key_cred_params = [{ type_ = credential_type; alg = -7 }];
       rp = { id = rpid webauthn; name = webauthn.name };
       timeout;
       user = { id = user_id; name = user_name; display_name = display_name };

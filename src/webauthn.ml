@@ -23,6 +23,8 @@ type error = [
   | `Rpid_hash_mismatch of string * string
   | `Missing_credential_data
   | `Signature_verification of string
+  | `Challenge_mismatch of string * string
+  | `Sign_count_mismatch of Int32.t * Int32.t
 ]
 
 let pp_error ppf = function
@@ -57,6 +59,10 @@ let pp_error ppf = function
       (Base64.encode_string should) (Base64.encode_string is)
   | `Missing_credential_data -> Fmt.string ppf "missing credential data"
   | `Signature_verification msg -> Fmt.pf ppf "signature verification failed %s" msg
+  | `Challenge_mismatch (expected, got) ->
+    Fmt.pf ppf "challenge mismatch: expected %s, received %s" expected got
+  | `Sign_count_mismatch (old, new_) ->
+    Fmt.pf ppf "sign count mismatch: old %ld, new %ld" old new_
 
 type t = {
   name : string;
@@ -261,7 +267,7 @@ let json_assoc thing : Yojson.Safe.t -> ((string * Yojson.Safe.t) list, _) resul
   | `Assoc s -> Ok s
   | json -> Error (`Json_decoding (thing, "non-assoc", Yojson.Safe.to_string json))
 
-let create ?(name="localhost") origin =
+let create ?name origin =
   match String.split_on_char '/' origin with
   | [ proto ; "" ; host_port ]
       when proto = "https:" || proto = "http:" && (String.equal host_port "localhost" || String.starts_with ~prefix:"localhost:" host_port) ->
@@ -283,7 +289,7 @@ let create ?(name="localhost") origin =
                       with Failure _ -> Error ("invalid port " ^ port)))
         | _ -> Error ("invalid origin host and port " ^ host_port)
       with
-      | Ok host -> Ok { name ; origin ; rpid = host }
+      | Ok host -> Ok { name = Option.value ~default:origin name ; origin ; rpid = host }
       | Error _ as e -> e
     end
   | _ ->  Error ("invalid origin " ^ origin)
@@ -485,12 +491,12 @@ let transports_of_cert c =
     (fun (_, data) -> decode_transport data)
 
 module Simple = struct
-  let b64_urldec str =
-    match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet str with
-    | Ok s -> s
-    | Error (`Msg m) -> failwith m
+  let ( let* ) = Result.bind
 
-  let challenge_to_yojson c = `String (c |> challenge_to_string |> b64_urlenc)
+  let b64_urldec str =
+    Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet str
+
+  let challenge_to_yojson c = `String (b64_urlenc (challenge_to_string c))
 
   type credential = { id : string; type_ : string [@key "type"] } [@@deriving to_yojson]
   type cred_param = { type_ : string [@key "type"]; alg : int } [@@deriving to_yojson]
@@ -523,34 +529,34 @@ module Simple = struct
 
   type pub_key = Mirage_crypto_ec.P256.Dsa.pub
 
-  let pub_key_to_yojson pk = `String (
-    pk
-    |> Mirage_crypto_ec.P256.Dsa.pub_to_octets
-    |> b64_urlenc
-  )
+  let pub_key_to_yojson pk =
+    `String (b64_urlenc (Mirage_crypto_ec.P256.Dsa.pub_to_octets pk))
 
   let pub_key_of_yojson = function
     | `String s ->
-      (match Mirage_crypto_ec.P256.Dsa.pub_of_octets (b64_urldec s) with
-      | Ok pk -> Ok pk
-      | Error _ -> Error "invalid public key")
-    | _ -> Error "invalid public key"
+      (match b64_urldec s with
+      | Ok octets ->
+        (match Mirage_crypto_ec.P256.Dsa.pub_of_octets octets with
+        | Ok _ as pub_key -> pub_key
+        | Error e -> Fmt.error "%a" Mirage_crypto_ec.pp_error e)
+      | Error (`Msg str) -> Error str)
+    | _ -> Error "invalid JSON"
 
   type passkey = {
     credential_id : string;
     user_id : string;
     pub_key : pub_key;
     aaguid : string;
-    counter : Int32.t;
+    sign_count : Int32.t;
     created_at : float;
     last_used : float;
-  } [@@deriving yojson { strict = false; exn = true }]
+  } [@@deriving yojson { strict = false }]
 
   let generate_registration_options
     ?attestation
     ?(exclude_credentials=[])
     ?timeout
-    ?(user_id=Mirage_crypto_rng.generate 16)
+    ~user_id
     ~user_name
     ~display_name
     webauthn =
@@ -566,30 +572,20 @@ module Simple = struct
       user = { id = user_id; name = user_name; display_name = display_name };
     }
 
-  let or_invalid = function
-    | Ok v -> v
-    | Error e -> Fmt.kstr invalid_arg "error: %a" pp_error e
-
-  let verify_registration_response ~expected_challenge ~user_id response webauthn =
-    let challenge, registration = response
-      |> register_response_of_string
-      |> or_invalid
-      |> register webauthn
-      |> or_invalid
-    in
-    (if expected_challenge |> challenge_equal challenge |> not
-    then invalid_arg "verify_registration_response: challenge mismatch");
-
-    let created_at = Unix.time () in
-    {
-      user_id;
-      credential_id = b64_urlenc registration.attested_credential_data.credential_id;
-      pub_key = registration.attested_credential_data.public_key;
-      aaguid = registration.attested_credential_data.aaguid;
-      counter = registration.sign_count;
-      created_at;
-      last_used = created_at;
-    }
+  let verify_registration_response ~expected_challenge ~user_id ~created_at response webauthn =
+    let* register_response = register_response_of_string response in
+    let* challenge, registration = register webauthn register_response in
+    if challenge_equal expected_challenge challenge then
+      Ok {
+        user_id;
+        credential_id = b64_urlenc registration.attested_credential_data.credential_id;
+        pub_key = registration.attested_credential_data.public_key;
+        aaguid = registration.attested_credential_data.aaguid;
+        sign_count = registration.sign_count;
+        created_at;
+        last_used = created_at;
+      }
+    else Error (`Challenge_mismatch (expected_challenge, challenge))
 
   let generate_authentication_options
     ?(allow_credentials=[])
@@ -603,15 +599,16 @@ module Simple = struct
     user_verification;
   }
 
-  let verify_authentication_response ~expected_challenge ~pub_key response webauthn =
-    let challenge, authentication = response
-      |> authenticate_response_of_string
-      |> or_invalid
-      |> authenticate webauthn pub_key
-      |> or_invalid
+  let verify_authentication_response ~expected_challenge ~passkey response webauthn =
+    let* authenticate_response = authenticate_response_of_string response in
+    let* challenge, authentication =
+      authenticate webauthn passkey.pub_key authenticate_response
     in
-    (if expected_challenge |> challenge_equal challenge |> not
-    then invalid_arg "verify_authentication_response: challenge mismatch");
-
-    authentication
+    if challenge_equal expected_challenge challenge then
+      if Int32.(
+        unsigned_compare authentication.sign_count passkey.sign_count > 0
+        || equal authentication.sign_count zero && equal passkey.sign_count zero
+      ) then Ok authentication
+      else Error (`Sign_count_mismatch (passkey.sign_count, authentication.sign_count))
+    else Error (`Challenge_mismatch (expected_challenge, challenge))
 end

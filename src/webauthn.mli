@@ -32,7 +32,7 @@
 type t
 
 (** [create ?name origin] is a webauthn state for a relying party [name] (default
-    ["localhost"]) and hostname [origin], or an error if the [origin] does not
+    [origin]) and hostname [origin], or an error if the [origin] does not
     meet the specification: schema must be https, the host must be a valid
     hostname. An optional port is supported: https://example.com:4444
 
@@ -73,6 +73,19 @@ type error = [
   | `Rpid_hash_mismatch of string * string
   | `Missing_credential_data
   | `Signature_verification of string
+
+  | `Challenge_mismatch of string * string
+  (** Expected and received challenges are not matching either during
+      registration or authentication. *)
+
+  | `Sign_count_mismatch of Int32.t * Int32.t
+  (** Order: passkey counter, authenticator counter
+
+      Signature count received from the client's authenticator is not strictly
+      larger than the stored sign count in our passkey. This could indicate a
+      compromised authenticator. See
+      {{: https://w3c.github.io/webauthn/#sctn-sign-counter}Signature Counter
+      Considerations}. *)
 ]
 
 (** [pp_error ppf e] pretty-prints the error [e] on [ppf]. *)
@@ -198,9 +211,6 @@ val transports_of_cert : X509.Certificate.t ->
     - {!Simple.generate_authentication_options}
     - {!Simple.verify_authentication_response}
 
-    The 'verify' functions raise [Invalid_argument] in case any of the
-    verification steps fails.
-
     @since 0.3.0 *)
 module Simple : sig
   (** {2 JSON objects}
@@ -246,20 +256,22 @@ module Simple : sig
     (** Use this as the lookup key when storing passkeys. *)
 
     user_id : string;
-    (** Foreign key referencing the users table. *)
+    (** Foreign key referencing the users table. See also
+        {!generate_registration_options}. *)
 
     pub_key : pub_key;
     aaguid : string;
 
-    counter : Int32.t;
-    (** Increment this after each successful authentication ceremony. *)
+    sign_count : Int32.t;
+    (** Set this to the value of [authentication.sign_count] after each
+        successful authentication ceremony. *)
 
     created_at : float;
-    (** Current time on server at creation using [Unix.time ()]. *)
+    (** Current time on server at creation using [Unix.time ()] or equivalent. *)
 
     last_used : float;
     (** Update this timestamp after each authentication ceremony. *)
-  } [@@deriving yojson { exn = true }]
+  } [@@deriving yojson]
   (** Store this in persistent storage. Values can be converted into JSON strings
       using [passkey |> Simple.passkey_to_yojson |> Yojson.Safe.to_string]. And
       converted from JSON strings using
@@ -281,20 +293,20 @@ module Simple : sig
     ?attestation:string ->
     ?exclude_credentials:credential list ->
     ?timeout:float ->
-    ?user_id:string ->
+    user_id:string ->
     user_name:string ->
     display_name:string ->
     t ->
     public_key_credential_creation_options
   (** [generate_registration_options ?attestation ?exclude_credentials ?timeout
-      ?user_id ~user_name ~display_name webauthn] is an options object that can
+      ~user_id ~user_name ~display_name webauthn] is an options object that can
       be encoded into a JSON string and then decoded in the browser. Parameters
       are as described here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
       PublicKeyCredentialCreationOptions instance properties}
 
-      @param user_id defaults to a randomly-generated 16-byte string. Override it
-        to specify IDs from your user database.
+      @param user_id must be a user identifier from your own user database to
+        allow a single user to have multiple passkeys.
 
       Example usage in server:
 
@@ -323,12 +335,15 @@ module Simple : sig
   val verify_registration_response :
     expected_challenge:challenge ->
     user_id:string ->
+    created_at:float ->
     string ->
     t ->
-    passkey
-  (** [verify_registration_response ~expected_challenge ~user_id response
-      webauthn] is a passkey constructed after verifying the registration
-      response.
+    (passkey, error) result
+  (** [verify_registration_response ~expected_challenge ~user_id ~created_at
+      response webauthn] is a passkey constructed after verifying the
+      registration response.
+
+      @param created_at is set as the value of [passkey.created_at].
 
       The [response] can be obtained with something like this:
 
@@ -336,9 +351,7 @@ module Simple : sig
       const credential = await navigator.credentials.create({ publicKey: options });
       const response = JSON.stringify(credential.toJSON().response);
       // Upload response to server
-      ]}
-
-      @raise Invalid_argument if registration verification fails. *)
+      ]} *)
 
   (** {2:auth Authentication ceremony} *)
 
@@ -381,25 +394,24 @@ module Simple : sig
 
   val verify_authentication_response :
     expected_challenge:challenge ->
-    pub_key:pub_key ->
+    passkey:passkey ->
     string ->
     t ->
-    authentication
-  (** [verify_authentication_response ~expected_challenge ~pub_key response
+    (authentication, error) result
+  (** [verify_authentication_response ~expected_challenge ~passkey response
       webauthn] is an [authentication] object constructed after verifying the
-      authentication response.
+      authentication response and signature counters.
 
-      The [response] can be obtained with something like this:
+      The [response] can be obtained from the client with something like this:
 
       {@javascript[
       const credential = await navigator.credentials.get({ publicKey: options });
-      const response = JSON.stringify(credential.toJSON().response);
-      // Upload credential.id and response to server
+      const responseStr = JSON.stringify(credential.toJSON().response);
+
+      // Upload credential.id and response to server:
+      fetch('/authenticate/' + credential.id, { method: 'POST', body: responseStr });
       ]}
 
-      The [pub_key] can be obtained by looking up the stored {!passkey}
-      corresponding to [credential.id] obtained from the client, and getting its
-      public key.
-
-      @raise Invalid_argument if authentication verification fails. *)
+      The [passkey] can be obtained on the server with a lookup of the
+      corresponding [credential.id] obtained from the client. *)
 end

@@ -348,8 +348,7 @@ module Simple : sig
       registration response.
 
       @param created_at is set as the value of [passkey.created_at].
-
-      The [response] can be obtained with something like this:
+      @param response can be obtained with something like this:
 
       {@javascript[
       const credential = await navigator.credentials.create({ publicKey: options });
@@ -406,7 +405,7 @@ module Simple : sig
       webauthn] is an [authentication] object constructed after verifying the
       authentication response and signature counters.
 
-      The [response] can be obtained from the client with something like this:
+      @param response can be obtained from the client with something like this:
 
       {@javascript[
       const credential = await navigator.credentials.get({ publicKey: options });
@@ -416,6 +415,6 @@ module Simple : sig
       fetch('/authenticate/' + credential.id, { method: 'POST', body: responseStr });
       ]}
 
-      The [passkey] can be obtained on the server with a lookup of the
-      corresponding [credential.id] obtained from the client. *)
+      @param passkey can be obtained on the server with a lookup of the
+        corresponding [credential.id] obtained from the client. *)
 end

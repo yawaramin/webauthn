@@ -76,7 +76,9 @@ type error = [
 
   | `Challenge_mismatch of string * string
   (** Expected and received challenges are not matching either during
-      registration or authentication. *)
+      registration or authentication.
+
+      @since 0.3.0 *)
 
   | `Sign_count_mismatch of Int32.t * Int32.t
   (** Order: passkey counter, authenticator counter
@@ -85,7 +87,9 @@ type error = [
       larger than the stored sign count in our passkey. This could indicate a
       compromised authenticator. See
       {{: https://w3c.github.io/webauthn/#sctn-sign-counter}Signature Counter
-      Considerations}. *)
+      Considerations}.
+
+      @since 0.3.0 *)
 ]
 
 (** [pp_error ppf e] pretty-prints the error [e] on [ppf]. *)
@@ -305,8 +309,8 @@ module Simple : sig
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
       PublicKeyCredentialCreationOptions instance properties}
 
-      @param user_id must be a user identifier from your own user database to
-        allow a single user to have multiple passkeys.
+      @param user_id must be a user identifier from your user database to allow a
+        single user to have multiple passkeys.
 
       Example usage in server:
 

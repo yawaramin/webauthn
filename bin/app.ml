@@ -2,6 +2,11 @@ module Simple = Webauthn.Simple
 
 let or_failwith msg = function Some v -> v | None -> failwith msg
 let or_invalid_arg msg = function Some v -> v | None -> invalid_arg msg
+
+let or_invalid = function
+  | Ok v -> v
+  | Error e -> invalid_arg (Fmt.str "%a" Webauthn.pp_error e)
+
 let or_not_found = function Some v -> v | None -> raise Not_found
 
 (* Simplified passkey storage. Of course, in production these would be in some
@@ -46,24 +51,6 @@ let lookup_passkey credential_id = credential_id
   |> or_failwith (Fmt.str "lookup_passkey: Passkey %s not found" credential_id)
 
 let lookup_passkeys user_id = List.map lookup_passkey (lookup_user user_id).credential_ids
-
-let check_counter credential_id counter =
-  let passkey = lookup_passkey credential_id in
-  let ok = Int32.unsigned_compare counter passkey.Simple.counter > 0
-
-  (* As per https://w3c.github.io/webauthn/#sctn-sign-counter
-
-     Some authenticators always return a sign count of 0 (zero). In these cases
-     there is no way to detect a cloned authenticator. *)
-    || Int32.equal counter Int32.zero && Int32.equal passkey.counter Int32.zero
-  in
-  if ok then
-    Hashtbl.replace credential_passkeys credential_id {
-      passkey with counter = counter;
-      last_used = Unix.time ();
-    }
-  else invalid_arg "Could not verify user device"
-
 let put_flash req = Dream.add_flash_message req "info"
 let get_flash req = req |> Dream.flash_messages |> List.assoc_opt "info"
 
@@ -114,7 +101,12 @@ let register_finish webauthn = Dream_html.post Path.register (fun req ->
   and user_id = user_id_field_name |> Dream.session_field req |> or_not_found in
   let%lwt response = Dream.body req in
   webauthn
-  |> Simple.verify_registration_response ~expected_challenge ~user_id response
+  |> Simple.verify_registration_response
+    ~expected_challenge
+    ~user_id
+    ~created_at:(Unix.time ())
+    response
+  |> or_invalid
   |> add_passkey;
 
   let%lwt () = Dream.invalidate_session req in
@@ -144,12 +136,16 @@ let login_finish webauthn = Dream_html.post Path.login (fun req ->
   in
   match%lwt Dream.form ~csrf:false req with
   | `Ok ["credential-id", credential_id; "response", response] ->
-    let { Simple.pub_key; user_id; _ } = lookup_passkey credential_id in
-    let user_credentials = lookup_user user_id
-    and auth =
-      Simple.verify_authentication_response ~expected_challenge ~pub_key response webauthn
+    let passkey = lookup_passkey credential_id in
+    let user_credentials = lookup_user passkey.user_id in
+    let auth = webauthn
+      |> Simple.verify_authentication_response ~expected_challenge ~passkey response
+      |> or_invalid
     in
-    check_counter credential_id auth.sign_count;
+    Hashtbl.replace credential_passkeys credential_id {
+      passkey with sign_count = auth.sign_count;
+      last_used = Unix.time ();
+    };
     put_flash req "Successfully logged in!";
 
     let%lwt () = Dream.invalidate_session req in

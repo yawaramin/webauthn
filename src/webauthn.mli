@@ -276,10 +276,11 @@ module Simple : sig
     last_used : float;
     (** Update this timestamp after each authentication ceremony. *)
   } [@@deriving yojson]
-  (** Store this in persistent storage. Values can be converted into JSON strings
-      using [passkey |> Simple.passkey_to_yojson |> Yojson.Safe.to_string]. And
-      converted from JSON strings using
-      [str |> Yojson.Safe.from_string |> Simple.passkey_of_yojson_exn].
+  (** Store this in persistent storage. Values can be serialized into JSON
+      strings using
+      [passkey |> Simple.passkey_to_yojson |> Yojson.Safe.to_string], and
+      deserialized using
+      [str |> Yojson.Safe.from_string |> Simple.passkey_of_yojson].
 
       Suggested storage schema (adapt to your needs):
 
@@ -309,6 +310,8 @@ module Simple : sig
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions#instance_properties}
       PublicKeyCredentialCreationOptions instance properties}
 
+      @param exclude_credentials the default is to {e not exclude} any
+        credentials.
       @param user_id must be a user identifier from your user database to allow a
         single user to have multiple passkeys.
 
@@ -370,6 +373,8 @@ module Simple : sig
       here:
       {{: https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions#instance_properties}
       PublicKeyCredentialRequestOptions instance properties}
+
+      @param allow_credentials the default is to allow {e any} credentials.
 
       Example usage in server:
 

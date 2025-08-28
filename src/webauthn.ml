@@ -289,7 +289,12 @@ let create ?name origin =
                       with Failure _ -> Error ("invalid port " ^ port)))
         | _ -> Error ("invalid origin host and port " ^ host_port)
       with
-      | Ok host -> Ok { name = Option.value ~default:origin name ; origin ; rpid = host }
+      | Ok host ->
+        Ok {
+          name = Option.value name ~default:(Domain_name.to_string host) ;
+          origin ;
+          rpid = host ;
+        }
       | Error _ as e -> e
     end
   | _ ->  Error ("invalid origin " ^ origin)
@@ -537,7 +542,7 @@ module Simple = struct
       (match b64_urldec s with
       | Ok octets ->
         (match Mirage_crypto_ec.P256.Dsa.pub_of_octets octets with
-        | Ok _ as pub_key -> pub_key
+        | Ok _ as ok -> ok
         | Error e -> Fmt.error "%a" Mirage_crypto_ec.pp_error e)
       | Error (`Msg str) -> Error str)
     | _ -> Error "invalid JSON"

@@ -127,31 +127,29 @@ let login_start webauthn = Dream_html.get Path.login (fun req ->
   |> Yojson.Safe.to_string
   |> Dream.json ~headers:[no_store])
 
-let login_finish webauthn = Dream_html.post Path.login (fun req ->
+let login_finish webauthn = Dream_html.post Path.login_finish (fun req credential_id ->
   let expected_challenge = challenge_field_name
     |> Dream.session_field req
     |> or_invalid_arg "Missing challenge"
     |> Webauthn.challenge_of_string
     |> or_invalid_arg "Invalid challenge"
   in
-  match%lwt Dream.form ~csrf:false req with
-  | `Ok ["credential-id", credential_id; "response", response] ->
-    let passkey = lookup_passkey credential_id in
-    let user_credentials = lookup_user passkey.user_id in
-    let auth = webauthn
-      |> Simple.verify_authentication_response ~expected_challenge ~passkey response
-      |> or_invalid
-    in
-    Hashtbl.replace credential_passkeys credential_id {
-      passkey with sign_count = auth.sign_count;
-      last_used = Unix.time ();
-    };
-    put_flash req "Successfully logged in!";
+  let%lwt response = Dream.body req in
+  let passkey = lookup_passkey credential_id in
+  let user_credentials = lookup_user passkey.user_id in
+  let auth = webauthn
+    |> Simple.verify_authentication_response ~expected_challenge ~passkey response
+    |> or_invalid
+  in
+  Hashtbl.replace credential_passkeys credential_id {
+    passkey with sign_count = auth.sign_count;
+    last_used = Unix.time ();
+  };
+  put_flash req "Successfully logged in!";
 
-    let%lwt () = Dream.invalidate_session req in
-    let%lwt () = Dream.set_session_field req session_field_name user_credentials.user_id in
-    Dream.empty `OK
-  | _ -> Dream.empty (`Status 422))
+  let%lwt () = Dream.invalidate_session req in
+  let%lwt () = Dream.set_session_field req session_field_name user_credentials.user_id in
+  Dream.empty `OK)
 
 let logout = Dream_html.post Path.logout (fun req ->
   let%lwt () = Dream.invalidate_session req in

@@ -11,13 +11,10 @@ document.getElementById('login-button')?.addEventListener('click', async evt => 
     return;
   }
 
-  await fetch('/login', {
+  await fetch('/login/' + credential.id, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      response: JSON.stringify(credential.toJSON().response),
-      'credential-id': credential.id,
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credential.toJSON().response),
   });
 
   window.location.href = '/';

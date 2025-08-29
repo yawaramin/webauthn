@@ -503,7 +503,12 @@ module Simple = struct
 
   let challenge_to_yojson c = `String (b64_urlenc (challenge_to_string c))
 
-  type credential = { id : string; type_ : string [@key "type"] } [@@deriving to_yojson]
+  type credential = {
+    id : string;
+    type_ : string [@key "type"];
+    transports : string list [@default []];
+  } [@@deriving to_yojson]
+
   type cred_param = { type_ : string [@key "type"]; alg : int } [@@deriving to_yojson]
   type rp = { id : string; name : string } [@@deriving to_yojson]
 

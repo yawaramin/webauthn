@@ -222,7 +222,12 @@ module Simple : sig
       These declarations are needed for JSON encoding. You can skip ahead to
       {!reg} and {!auth} which will create these for you. *)
 
-  type credential = { id : string; type_ : string }
+  type credential = {
+    id : string;
+    type_ : string;
+    transports : string list;
+  }
+
   type cred_param = { type_ : string; alg : int }
   type rp = { id : string; name : string }
 
@@ -319,7 +324,7 @@ module Simple : sig
 
       {[
       let options = Simple.generate_registration_options ... in
-      ...
+      ...temporarily store options.challenge and options.user.id...
 
       options
       |> Simple.public_key_credential_creation_options_to_yojson
@@ -380,7 +385,7 @@ module Simple : sig
 
       {[
       let options = Simple.generate_authentication_options webauthn in
-      ...
+      ...temporarily store options.challenge...
 
       options
       |> Simple.public_key_credential_request_options_to_yojson

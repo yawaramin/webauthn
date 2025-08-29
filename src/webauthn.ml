@@ -554,6 +554,7 @@ module Simple = struct
 
   type passkey = {
     credential_id : string;
+    display_name : string;
     user_id : string;
     pub_key : pub_key;
     aaguid : string;
@@ -582,13 +583,19 @@ module Simple = struct
       user = { id = user_id; name = user_name; display_name = display_name };
     }
 
-  let verify_registration_response ~expected_challenge ~user_id ~created_at response webauthn =
+  let verify_registration_response
+    ~expected_challenge
+    ~user_id
+    ~created_at
+    response
+    webauthn =
     let* register_response = register_response_of_string response in
     let* challenge, registration = register webauthn register_response in
     if challenge_equal expected_challenge challenge then
       Ok {
         user_id;
         credential_id = b64_urlenc registration.attested_credential_data.credential_id;
+        display_name = "Passkey";
         pub_key = registration.attested_credential_data.public_key;
         aaguid = registration.attested_credential_data.aaguid;
         sign_count = registration.sign_count;

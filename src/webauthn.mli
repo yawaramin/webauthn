@@ -264,6 +264,10 @@ module Simple : sig
     credential_id : string;
     (** Use this as the lookup key when storing passkeys. *)
 
+    display_name : string;
+    (** Human-readable name for displaying the passkey in UIs. Defaults to
+        [Passkey]. *)
+
     user_id : string;
     (** Foreign key referencing the users table. See also
         {!generate_registration_options}. *)
